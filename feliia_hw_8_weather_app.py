@@ -4,11 +4,12 @@ from pandas import DataFrame
 import numpy as np
 import datetime
 import requests
+from requests import Response
 
 
 class FetchWeatherResult:
     def __init__(self):
-        self.error_code: int
+        self.status_code: int
         self.dataFrame: DataFrame
         self.lon: float
         self.lat: float
@@ -16,32 +17,51 @@ class FetchWeatherResult:
         self.humidity: str
         self.wind_speed: str
         self.no_data_found: bool
+        self.error_text: str
+        self.response: Response
 
 
 API_KEY = st.secrets["openweather"]["api_key"]
 
 
-@st.cache_data(ttl=86400)
+# @st.cache_data(ttl=86400)
 def fetch_weather_data(city) -> FetchWeatherResult:
-    # city = 'London'
+
+    result = FetchWeatherResult()
+
     weather_url = f'http://api.openweathermap.org/data/2.5/weather?q={
         city}&appid={API_KEY}&units=metric'
 
     response = requests.get(url=weather_url)
 
     if response.status_code == 200:
-        return response.json()
+        result.response = response
+        # return response.json()
+    elif response.status_code == 404:
+        result.response = response
+        result.status_code = 404
+        result.error_text = 'Not data found for the selected city'
     else:
-        st.write(f"Fetching weather data failes {
-                 response.status_code} - {response.text}")
+        result.response = response
+        result.status_code = response.status_code
+        result.error_text = response.text
+        # st.write(f"Fetching weather data failes {
+        # response.status_code} - {response.text}")
+    return result
 
 
-def process_weather_data(weather_data) -> FetchWeatherResult:
+def process_weather_data(weather_result: FetchWeatherResult) -> FetchWeatherResult:
 
-    main_section = weather_data['main']
-    coord_section = weather_data['coord']
-    wind_section = weather_data['wind']
-    fetchData = FetchWeatherResult()
+    weather_data = weather_result.response.json()
+    fetchData = weather_result
+    try:
+        main_section = weather_data['main']
+        coord_section = weather_data['coord']
+        wind_section = weather_data['wind']
+    except:
+        print(f'No data found')
+        fetchData.no_data_found = True
+
     if 'main' in weather_data:
         df = pd.DataFrame([main_section])
         print(df)
@@ -66,22 +86,30 @@ def process_weather_data(weather_data) -> FetchWeatherResult:
 # """
 # Page 'render'
 # """
-# weather_url = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric'
-# forecast_url = f'http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units=metric'
-city_coordinates = dict(lon=None, lat=None)
+
 
 header = st.header(
     body=f"Robot Dreams Pyton - Weather Map & Data Visualization App")
 text_input_city = st.text_input(label=f"Enter city name:", value="London")
-if text_input_city:
-    result = process_weather_data(fetch_weather_data(text_input_city))
 fetch_button = st.button(label="Fetch")
-sub_header = st.subheader(body=f'Current weather in:  {text_input_city}')
 kpi1, kpi2, kpi3 = st.columns(3)
 
-kpi1.metric('Temperature (\u00B0C)', value=f'{result.temperature} \u00B0C')
-kpi2.metric('Humidity (%)', value=f'{result.humidity} %')
-kpi3.metric('Wind Speed (m/s)', value=f'{result.wind_speed} m/s')
+# """
+# Page 'interactions'
+# """
 
-df = pd.DataFrame({'lon': result.lon, 'lat': result.lat}, index=[0])
-city_map = st.map(data=df, latitude="lat", longitude="lon")
+
+if text_input_city:
+    result = process_weather_data(fetch_weather_data(text_input_city))
+    if result.no_data_found or result == None:
+        st.error(f'No data found for the selected city: {text_input_city}')
+
+    if result.no_data_found == False:
+        sub_header = st.subheader(
+            body=f'Current weather in:  {text_input_city}')
+        df = pd.DataFrame({'lon': result.lon, 'lat': result.lat}, index=[0])
+        kpi1.metric('Temperature (\u00B0C)', value=f'{
+                    result.temperature} \u00B0C')
+        kpi2.metric('Humidity (%)', value=f'{result.humidity} %')
+        kpi3.metric('Wind Speed (m/s)', value=f'{result.wind_speed} m/s')
+        city_map = st.map(data=df, latitude="lat", longitude="lon")
